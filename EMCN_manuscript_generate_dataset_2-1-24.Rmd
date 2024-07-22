@@ -1,0 +1,315 @@
+---
+title: "EMCN_Manuscript_Adult_WT_Choroid"
+author: "Ben Thomson"
+date: "2024-01-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#load all libraries
+
+  library(Seurat)
+  library(dplyr)
+  library(gdata)
+  library(sctransform)
+  library(cowplot)
+  library(ggplot2)
+  library(gridExtra)
+  library(clustree)
+  library(data.table)
+  library(scDblFinder)
+  library(kableExtra)
+  library(SoupX)
+  library(Matrix.utils)
+  library(SingleCellExperiment)
+  library(magrittr)
+  library(Matrix)
+  library(purrr)
+  library(reshape2)
+  library(S4Vectors)
+  library(tibble)
+
+
+
+```
+
+
+Open the datasets and general seurat objects
+
+```{r CreateObjects}
+
+  data.folder <- "./orig.data/"
+
+  folderlist <- dir(data.folder)
+  dataset.list <- vector(mode = "list")
+  soups.list <- vector(mode = "list")
+
+
+
+  #loop through all the files and convert them to Seurat objects for easier analysis
+  for (folder in folderlist) {
+     print(paste("Opening dataset:", folder))
+     counts.filtered <- Read10X_h5(filename = paste(data.folder, folder, "filtered_feature_bc_matrix.h5", sep = "/"))
+     counts.raw <- Read10X_h5(filename = paste(data.folder, folder, "raw_feature_bc_matrix.h5", sep = "/"))
+     dataset.list[folder] <- CreateSeuratObject(counts = counts.filtered, project = folder, min.cells = 2)
+     dataset.list[[folder]] <- RenameCells(dataset.list[[folder]], add.cell.id = folder)
+
+     soups.list[[folder]] <- SoupChannel(counts.raw, counts.filtered, calcSoupProfile = F)
+     soups.list[[folder]] <- estimateSoup(soups.list[[folder]])
+
+  }
+
+
+
+
+```
+
+After opening the files, we perform SoupX. First initially cluster the
+seurat objects.
+
+```{r}
+
+
+
+for (folder in folderlist) {
+
+  dataset.list[[folder]] <- Seurat::NormalizeData(dataset.list[[folder]])
+  dataset.list[[folder]] <- Seurat::ScaleData(dataset.list[[folder]])
+  dataset.list[[folder]] <- Seurat::FindVariableFeatures(dataset.list[[folder]])
+  dataset.list[[folder]] <- RunPCA(dataset.list[[folder]], npcs = 100)
+  dataset.list[[folder]] <- FindNeighbors(dataset.list[[folder]], dims = 1:30)
+  dataset.list[[folder]] <- FindClusters(dataset.list[[folder]], )
+  dataset.list[[folder]] <- RunUMAP(dataset.list[[folder]], dims = 1:30)
+
+  soups.list[[folder]] <- setClusters(soups.list[[folder]],setNames(dataset.list[[folder]]@meta.data$seurat_clusters,
+                                                                     rownames(dataset.list[[folder]]@meta.data)))
+  
+  
+  soups.list[[folder]] <- setDR(soups.list[[folder]], dataset.list[[folder]]@reductions$umap@cell.embeddings)
+
+  head(dataset.list[[folder]]@meta.data, 10)
+
+  soups.list[[folder]] <- autoEstCont(soups.list[[folder]])
+
+  head(soups.list[[folder]]$soupProfile[order(soups.list[[folder]]$soupProfile$est, decreasing = TRUE),], n = 20)
+
+  dataset.list[[folder]] <- adjustCounts(soups.list[[folder]], roundToInt = TRUE)
+
+  #regenerate seurat objects
+
+  dataset.list[folder] <- CreateSeuratObject(counts = dataset.list[[folder]], project = folder, min.cells = 2)
+  dataset.list[[folder]] <- RenameCells(dataset.list[[folder]], add.cell.id = folder)
+
+  #add a col for % of genes which are mitochondrial
+  dataset.list[[folder]][["percent.mt"]] <- PercentageFeatureSet(dataset.list[[folder]], pattern = "mt-", assay = "RNA")
+
+
+}
+
+
+```
+
+Next, we perform some basic QC to check the data. For initial analysis
+we removed all cells with \<500 or \>5000 unique features as well as
+cells with \>10% mitochondrial RNA.
+
+```{r QC1, fig.height=14, fig.width=10}
+
+QC.Vln.list <- lapply(dataset.list, function(v) {VlnPlot(v, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), combine = F)})
+
+QC.Vln.list <- lapply(QC.Vln.list, function(v) {lapply(v, function(i) { i <- i + theme(axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks= element_blank()) + NoLegend()}) })
+  
+
+dataset.list <- lapply(dataset.list, function(v) {subset(v, subset = nFeature_RNA > 500 & nFeature_RNA < 5000 & percent.mt < 10)})
+
+plot_grid(plotlist = lapply(QC.Vln.list, function(x) {plot_grid(plotlist = x, ncol = 4)}), ncol = 1, labels = names(dataset.list), scale = 0.8)
+
+
+
+```
+
+After basic QC, doublet detection was performed using the scDblFinder
+pipeline. Germain P (2020). scDblFinder: scDblFinder. R package version
+1.4.0, <https://github.com/plger/scDblFinder>. Doublet detection and
+removal using the standard perameters of 1% doublets per 1000 droplets
+sequenced.
+
+```{r doublets}
+
+scDbl.features <- 2000
+scDbl.dims <- 12
+
+
+#for each dataset, convert to SingleCellExperiment, run scDblFinder and return to Seurat object. To avoid introducing formatting issues to the Seurat object used for subsequent analysis, scDblFinder metadata are copied from this new object into the original dataset and the new object is then deleted.
+
+dataset.list <- lapply(dataset.list, function(x) {
+                    sce <- as.SingleCellExperiment(x)
+                    sce <- scDblFinder(sce, verbose=F, nfeatures = scDbl.features, dims = scDbl.dims)
+                    sce <- as.Seurat(sce)
+                    x <-  AddMetaData(x, col.name = 'doubletScore', metadata = sce$scDblFinder.score )
+                    x <-  AddMetaData(x, col.name = 'doubletClass', metadata = sce$scDblFinder.class )
+                }
+                )
+
+
+calls <-  lapply(dataset.list, function(x) { x@meta.data %>% as.data.table } )
+
+scDblFinder.calls <- rbindlist(calls)
+
+kbl(scDblFinder.calls[, .N, by = c("orig.ident", "doubletClass")], caption = "scDblFinder predictions") %>%
+kable_minimal(full_width = FALSE, position = "left", latex_options = "hold_position")
+
+
+
+
+```
+
+Droplets identified as "singlets" were used for subsequent analysis and
+doublets were discarded.
+
+```{r removeDoublets}
+  
+  dataset.list <- lapply(dataset.list, function(x) {x <- subset(x, subset = doubletClass == "singlet")})
+
+
+```
+
+We then integrated the samples using RPCA as implemented the integration
+pipeline in Seurat. Only variable features present in all samples were
+selected for dataset integration.
+
+```{r integrate}
+  
+  dataset.list <- lapply(dataset.list, function(v) { 
+    v <- FindVariableFeatures(object = v, selection.method = "vst", nfeatures = 8000, verbose = FALSE)
+    v <- NormalizeData(v)
+  })
+
+  #shared features
+  shared.var.features <- SelectIntegrationFeatures(object.list = dataset.list, nfeatures = 5000)
+
+  integration.features <- shared.var.features
+
+
+  dataset.list <- lapply(dataset.list, function(v) { 
+    v <- ScaleData(object = v, features = integration.features, verbose = FALSE) 
+    v <- RunPCA(object = v, features = integration.features, npcs = 35, verbose = FALSE)
+  })
+  
+  #find anchors for integration
+  anchors <- FindIntegrationAnchors(object.list = dataset.list, 
+                                     dims = 1:35, anchor.features = integration.features, reduction = "rpca")
+ 
+#intrgrate datasets
+  integrated <- IntegrateData(anchorset = anchors, verbose = T)
+  
+
+  
+#update the metadata based on original filenames
+  
+Idents(integrated) <- gsub(pattern=".+_", replacement="",
+                           gsub(pattern = '[2-9]*', replacement = "", integrated$orig.ident))
+  integrated[["genotype"]] <-Idents(integrated)
+  
+
+
+#remove unneeded variables
+
+rm(anchors, counts.filtered, counts.raw, soups.list, dataset.list, calls, scDblFinder.calls)
+gc()
+
+
+```
+
+Following CCA integration, the dataset was scaled and principal
+components were calculated for plotting and clustering of the integrated
+dataset.
+
+```{r scaleAndPCA}
+  full.dataset.dims <- 50
+
+  DefaultAssay(object = integrated) <- "integrated"
+  
+
+  #integrated <- NormalizeData(integrated, assay = "integrated")
+  integrated <- NormalizeData(integrated, assay = "RNA")
+  integrated <- ScaleData(integrated, assay = "integrated")
+  integrated <- ScaleData(integrated, assay = "RNA")
+
+  #run the PCA using the same features used for integration
+  integrated <- RunPCA(object = integrated, npcs = 100, verbose = T, 
+                       assay = "integrated")
+  
+
+```
+
+
+
+UMAP projection was then performed on the full dataset
+
+```{r umap}
+
+  DefaultAssay(object = integrated) <- "integrated" 
+
+  integrated <- RunUMAP(object = integrated, dims = 1:50, 
+                        min.dist = 1.5, n.neighbors = 800, verbose = FALSE, assay = "integrated")
+  
+  
+  DimPlot(object = integrated, reduction = "umap", label = TRUE, pt.size = 1, 
+          label.size = 4) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 26, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 24), axis.text = element_text(size = 24))
+  
+```
+
+CCA-aligned data was then clustered at low resolution using a Louvain
+algorithm implemented in Seurat.
+
+```{r initialplotting}
+
+  DefaultAssay(integrated) <- "integrated"
+  integrated <- FindNeighbors(object = integrated, dims = 1:50, 
+                              verbose = FALSE)
+  
+  integrated <- FindClusters(object = integrated, resolution = 0.6, verbose = FALSE)
+  
+  #Reorder cluster identities based on cluster tree
+  integrated <- BuildClusterTree(integrated, reorder.numeric = TRUE, reorder = TRUE, 
+                                 verbose = T, assay = "integrated", dims = 1:50)
+  
+  #Plot of cluster identities mapped on full dataset
+  DimPlot(object = integrated, reduction = "umap", label = TRUE, pt.size = 1, 
+          label.size = 4) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 26, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 24), axis.text = element_text(size = 24))
+  
+
+  PlotClusterTree(integrated)
+  
+
+```
+
+Now we save the data for futher analysis in other scripts.
+
+```{r saveData}
+
+saveRDS(integrated, "./WT_8_WT_dataset_for_EMCN_MS_2-1-24.rds")
+
+```
+
+Current R session.
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```
+
+
+

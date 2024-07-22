@@ -1,0 +1,421 @@
+---
+title: "EMCN_Manuscript_Adult_WT_Choroid"
+author: "Ben Thomson"
+date: "2024-01-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#load all libraries
+
+  library(Seurat)
+  library(dplyr)
+  library(gdata)
+  library(sctransform)
+  library(cowplot)
+  library(ggplot2)
+  library(gridExtra)
+  library(clustree)
+  library(data.table)
+  library(scDblFinder)
+  library(future)
+  library(kableExtra)
+  library(intrinsicDimension)
+  library(EnhancedVolcano)
+  library(SoupX)
+  library(biomaRt)
+  library(ashr)
+  library(Matrix.utils)
+  library(edgeR)
+  library(SingleCellExperiment)
+  library(magrittr)
+  library(Matrix)
+  library(purrr)
+  library(reshape2)
+  library(S4Vectors)
+  library(tibble)
+  library(MAST)
+
+
+
+```
+
+
+First we open the dataset saved in "EMCN_manuscript_data_analysis_2-1-24.Rmd"
+
+```{r fileOpen}
+
+full.dataset <- readRDS("./WT_8_WT_dataset_for_EMCN_MS_2-1-24.rds")
+DefaultAssay(full.dataset) <- 'RNA'
+
+```
+
+
+Now the clusters were identified
+
+
+```{r findmarkers}
+
+  markers.p56 <- FindAllMarkers(full.dataset, assay = "RNA", test.use = "MAST", logfc.threshold = 1, min.pct = 0.5, only.pos = T)
+  write.csv(markers.p56, file = "./P56_markers_all_2-11-24.csv")
+
+```
+
+```{r basicPlot}
+
+  DimPlot(object = full.dataset, reduction = "umap", label = TRUE, pt.size = 1, 
+          label.size = 4) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 26, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 24), axis.text = element_text(size = 24))
+
+
+```
+Dot plot of classical markers
+
+```{r, fig.width=12}
+
+DotPlot(full.dataset, features = c("Krt14", "Lyz2", "Il1b", "H2-Ab1", "Ccl4" ,"Aif1", "Cd79a", "Pecam1", "Emcn", "Pcp4", "Mlana", "Acta2", "Rgs5", "Pdgfrb", "Ptn", "Alpl", "Pdgfra" , "Fn1",
+                                   "Myoc", "Cd34", "Kera",  "Rho", "Rpe65", "Gfap", "Mpz")) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_y_discrete(limits=rev) +
+   theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 24, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 18), axis.text = element_text(size = 18))
+
+
+```
+
+First, we merge clusters to generate the final clusters for figure 2.
+
+
+```{r labelclusters}
+
+
+full.dataset <- RenameIdents(object = full.dataset, 
+                              '1' = "Cor. Epi",
+                              '2' = "Mono/Mac",
+                              '3' = "Mono/Mac",
+                              '4' = "Mono/Mac",
+                              '5' = "Mono/Mac",
+                              '6' = "Mono/Mac",
+                              '7' = "Mono/Mac",
+                              '8' = "Mono/Mac",
+                              '9' = "T/NK",
+                              '10' = "B cell",
+                              '11' = "Endos",
+                              '12' = "Ciliary Epithelium",
+                              '13' = "melanocyte",
+                              '14' = "melanocyte",
+                              '15' = "vSMC",
+                              '16' = "Pericyte",
+                              '17' = "Stroma",
+                              '18' = "Stroma",
+                              '19' = "Stroma",
+                              '20' = "Stroma",
+                              '21' = "Stroma",
+                              '22' = "Stroma",
+                              '23' = "Sclera",
+                              '24' = "Cor. Stroma",
+                              '25' = "Rod",
+                              '26' = "RPE",
+                              '27' = "Astrocyte",
+                              '28' = "Schwann"
+                             )
+saveRDS(full.dataset, "./full-dataset-annotated-3-21-24.rds")
+
+
+```
+
+Dot plot of classical markers, streamlined
+
+```{r, fig.width=12}
+
+P1 <- DotPlot(full.dataset, features = c("Krt14", "Lyz2","Aif1", "Cd3e","Cd79a", "Pecam1", "Emcn", 
+                                         "Gsta3" ,"Crhbp", "Mlana", "Acta2", "Rgs5", "Pdgfrb", "Pdgfra" , "Fn1",
+                                   "Cd34", "Kera",  "Rho", "Rpe65", "Gfap", "Mpz")) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + scale_y_discrete(limits=rev) +
+   theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 24, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_blank(), axis.text = element_text(size = 18))
+
+P1
+
+  pdf(file = "./figures/Figure_2_identity-dots.pdf", width = 11, height = 6)
+  plot(P1)
+  dev.off()
+
+
+```
+
+```{r}
+
+
+P1 <-   DimPlot(object = full.dataset, reduction = "umap", label = F, pt.size = 1, 
+          label.size = 4) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 26, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 24), axis.text = element_text(size = 24))
+
+  pdf(file = "./figures/Figure_2_UMAP.pdf", width = 6, height = 6)
+  plot(P1)
+  dev.off()
+  
+  
+```
+
+
+
+Now plot endomucin compared with other markers
+
+```{r fig.height=15}
+
+P1 <- FeaturePlot(full.dataset, features = c("Emcn", "Cdh5", "Pdgfra", "Rgs5"), ncol = 2, pt.size = 1) &
+                theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 26, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 24), axis.text = element_text(size = 24))
+
+P1
+
+  pdf(file = "./figures/Figure_2_b.pdf", width = 10, height = 10)
+  plot(P1)
+  dev.off()
+  
+  
+```
+
+
+To determine if the PGDFrB+ EMCN cells are doublets, we looked for expression of other endothelial markers
+
+```{r, fig.height=15}
+P1 <- FeaturePlot(full.dataset, features = c("Emcn", "Kdr", "Pecam1", "Tek", "Podxl", "Plvap"), ncol = 2, pt.size = 1) &
+                theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 26, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 24), axis.text = element_text(size = 24))
+
+
+  pdf(file = "./figures/Sup figure 1.pdf", width = 12, height = 12)
+  plot(P1)
+  dev.off()
+```
+
+Violin plots
+
+```{r, fig.height=12, fig.width=10}
+
+P1 <- VlnPlot(full.dataset, features = c("Emcn", "Cdh5", "Kdr", "Rgs5", "Pdgfra"), pt.size = 0, ncol = 1) &
+                NoLegend() &
+                theme(aspect.ratio = 0.25) &
+                theme(axis.line = element_line(size = 1)) &
+                theme(axis.ticks.y = element_blank(), axis.ticks.x = element_blank()) &
+                theme(title = element_blank()) &
+                  theme(axis.title = element_blank(), axis.text = element_text(size = 12), 
+                        axis.title.y = element_blank(), axis.text.y = element_blank()) &
+                theme(plot.title = element_text(size = 26, face = "italic"))
+
+P1
+  #               
+  # pdf(file = "./figures/Figure_2_vlns.pdf", width = 6, height = 18)
+  # plot(P1)
+  # dev.off()
+  
+```
+
+Clusters 23 and 24 represent corneal stroma.
+
+15 and 16 vSMCs and pericytes. EMCN seems to be expressed only in pericytes
+
+
+Cluters 17-22 are PDGFRA+ stroma cells, clusters 17-19 are EMCN+. How are these cells different?
+
+First, the stromal clusters were isolated and re-clustered
+
+```{r fig.width=8}
+
+stroma.subset <- subset(full.dataset, idents = c("Stroma"))
+DefaultAssay(stroma.subset) <- "integrated"
+
+stroma.subset <- FindVariableFeatures(stroma.subset)
+stroma.subset <- RunPCA(stroma.subset, npcs = 50)
+
+stroma.subset <- RunUMAP(object = stroma.subset, dims = 1:10, 
+                        min.dist = 0.5, n.neighbors = 800, verbose = FALSE, assay = "integrated")
+
+stroma.subset <- FindNeighbors(object = stroma.subset, dims = 1:10)
+stroma.subset <- FindClusters(object = stroma.subset, resolution = 0.4, verbose = FALSE)
+  
+  #Reorder cluster identities based on cluster tree
+  stroma.subset <- BuildClusterTree(stroma.subset, reorder.numeric = TRUE, reorder = TRUE, 
+                                 verbose = T, assay = "full.dataset", dims = 1:10)
+  
+  
+  PlotClusterTree(stroma.subset)
+  saveRDS(stroma.subset, "./EMCN-stroma-2-21-24.rds")
+  
+    pdf(file = "./figures/Figure_3_tree.pdf", width = 10, height = 5)
+  PlotClusterTree(stroma.subset)
+  dev.off()
+  
+  DefaultAssay(stroma.subset) <- "RNA"
+  
+  #Plot of cluster identities mapped on full dataset
+  P1 <- DimPlot(object = stroma.subset, reduction = "umap", label = TRUE, pt.size = 1, 
+          label.size = 4) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 22, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 18), axis.text = element_text(size = 18))
+  
+  P2 <-   FeaturePlot(stroma.subset, features = "Emcn", pt.size = 1) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 22, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 18), axis.text = element_text(size = 18))
+  
+  P3 <-   FeaturePlot(stroma.subset, features = "Cdh5", pt.size = 1) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 22, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 18), axis.text = element_text(size = 18))
+  
+  (P1 + P2) / P3
+  
+  pdf(file = "./figures/Figure_3_a.pdf", width = 10, height = 5)
+  plot(P1 + P2 + P3)
+  dev.off()
+  
+  FeaturePlot(stroma.subset, features = "Pecam1", pt.size = 1) & coord_fixed() & theme(aspect.ratio=1) &
+                theme(plot.title = element_text(size = 22, face = "italic")) &
+                theme(axis.line = element_line(color="black", linewidth = 1), axis.ticks = element_line(color="black", size = 1)) &
+                theme(axis.title = element_text(size = 18), axis.text = element_text(size = 18))
+  
+  
+  write.csv(FindAllMarkers(stroma.subset, only.pos = T, logfc.threshold = 1), file = "./All_markers_stroma_subset_2-12-24.csv")
+
+
+```
+
+
+Violin plots
+
+```{r, fig.height=12, fig.width=10}
+
+ P1 <- VlnPlot(stroma.subset, features = c("Emcn", "Cdh5", "Col8a2", "Col1a1", 
+                                           "Cxcl10", "Cfh", "Alpl", "Fn1", "Isg15", 
+                                           "Igfbp2", "Cxcl12", "Ifit3", "Dcn","Angptl7", 
+                                           "Myoc", "Pdgfra", "Mmp3", "Serpine2"), 
+               pt.size = 0, ncol = 2, assay = "RNA") &
+                NoLegend() &
+                theme(aspect.ratio = 0.25) &
+                theme(axis.line = element_line(size = 1)) &
+                theme(axis.ticks.y = element_blank(), axis.ticks.x = element_blank()) &
+                theme(title = element_blank()) &
+                  theme(axis.title = element_blank(), axis.text = element_text(size = 16), 
+                        axis.title.y = element_blank(), axis.text.y = element_blank(), 
+                        axis.text.x = element_text(angle = 0)) &
+                theme(plot.title = element_text(size = 26, face = "italic"))
+
+P1
+
+  pdf(file = "./figures/Figure_3_b.pdf", width = 6, height = 15)
+  plot(P1)
+  dev.off()
+
+```
+
+
+
+```{r, fig.height=10}
+  
+
+  
+  
+  DimPlot(object = stroma.subset, reduction = "umap", label = TRUE, pt.size = 1, 
+          label.size = 4) + coord_fixed() + theme(aspect.ratio=1)
+
+  stroma.renamed <- stroma.subset
+  
+  stroma.renamed$orig.clusters <- Idents(stroma.subset)
+  
+  Idents(stroma.renamed) <- "Emcn-neg"
+  
+  stroma.renamed <- SetIdent(stroma.renamed, cells = Cells(subset(stroma.subset, idents = c(1:4))), "Emcn-pos")
+  
+  stroma.renamed$emcn.status <- Idents(stroma.renamed)
+  
+  Idents(stroma.renamed) <- stroma.renamed$orig.clusters
+  
+  
+  Idents(stroma.renamed) <- "emcn.status"
+    
+
+      markers <- FindMarkers(stroma.renamed, ident.2 = "Emcn-neg", ident.1 = "Emcn-pos", assay = "RNA", test.use = "MAST")
+      setDT(markers, keep.rownames = "Gene")[]
+      head(arrange(markers, desc(abs(avg_log2FC))))
+      
+      p <- EnhancedVolcano(markers, lab = markers$Gene, x = 'avg_log2FC', y = 'p_val_adj', 
+                           title = paste("Emcn-neg vs Emcn-pos, stroma"), FCcutoff = 0.2, drawConnectors = T, 
+                           pCutoff = 10e-4)
+      ggsave(p, filename=paste("./DE_output/Stroma_reclustered_EMCN-status_volcano_1-12-24.png",sep = "" ))
+
+      p
+      
+     write.csv(markers, paste("./DE_output/Stroma_reclustered_EMCN-status_DE_1-2-24.csv",sep = "" ))
+
+  
+  
+
+  
+  
+```
+
+
+```{r}
+
+updated.full <- SetIdent(full.dataset, cells = Cells(stroma.renamed), value = Idents(stroma.renamed))
+
+x <- FindMarkers(updated.full, ident.1 = "Emcn-pos")
+
+```
+
+Find correlated genes
+```{r}
+
+
+# Calculate the correlation matrix between genes
+
+gene_of_interest <- "Emcn"
+
+# Get the expression values of the gene of interest
+gene_expression <- stroma.subset@assays$RNA@scale.data[gene_of_interest, ]
+
+# Calculate the correlation between the expression of the gene of interest and all other genes
+correlations <- cor(t(stroma.subset@assays$RNA@scale.data), gene_expression)
+
+write.csv(correlations, paste("./Stroma_genes_correlated_with_EMCN_DE_1-17-24.csv",sep = "" ))
+
+# Calculate the correlation matrix between genes
+
+gene_of_interest <- "Pdgfra"
+
+# Get the expression values of the gene of interest
+gene_expression <- stroma.subset@assays$RNA@scale.data[gene_of_interest, ]
+
+# Calculate the correlation between the expression of the gene of interest and all other genes
+correlations <- cor(t(stroma.subset@assays$RNA@scale.data), gene_expression)
+
+write.csv(correlations, paste("./Stroma_genes_correlated_with_PDGFRA_DE_1-17-24.csv",sep = "" ))
+
+
+```
+
+
+
+
+```{r sessionInfo}
+sessionInfo()
+
+```
+
